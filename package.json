@@ -1,0 +1,22 @@
+{
+  "name": "running-times",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "apollo-server": "^2.10.1",
+    "bcryptjs": "^2.4.3",
+    "graphql": "^14.6.0",
+    "graphql-tag": "^2.10.3",
+    "jsonwebtoken": "^8.5.1",
+    "jwt-decode": "^2.2.0",
+    "mongoose": "^5.9.1",
+    "nodemon": "^2.0.2"
+  }
+}
