@@ -11,7 +11,7 @@ function generateToken(user) {
     id: user.id,
     email: user.email,
     username: user.username
-  }, SECRET, { expiresIn: '1h' });
+  }, process.env.SECRET, { expiresIn: '1h' });
 };
 
 function secondsToFormat(totalSeconds) {

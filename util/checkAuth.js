@@ -10,7 +10,7 @@ module.exports = (context) => {
     const token = authHeader.split('Bearer ')[1]; // remember: 'split' returns an array with 2 items, in this case we want the second item (the auth token which is listed after 'Bearer ')
     if(token) {
       try {
-        const user = jwt.verify(token, SECRET);
+        const user = jwt.verify(token, process.env.SECRET);
         return user
       } catch(err) {
         throw new AuthenticationError('Invalid/Expired token');
