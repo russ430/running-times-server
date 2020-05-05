@@ -11,7 +11,7 @@ const { formatRunData } = require('../../util/formatRunData');
 const { resetRunStats } = require('../../util/resetRunStats');
 
 // ---- ENV VARIABLES ---- //
-const { SECRET } = require('../../config');
+// const { SECRET } = require('../../config');
 
 // ---- SCHEMAS ---- //
 const User = require('../../models/User');
@@ -23,7 +23,7 @@ function generateToken(user) {
       email: user.email,
       username: user.username,
     },
-    SECRET,
+    process.env.SECRET,
     { expiresIn: '1h' }
   );
 }
