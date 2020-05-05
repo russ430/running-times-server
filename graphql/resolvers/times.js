@@ -1,225 +1,153 @@
 const { AuthenticationError } = require('apollo-server');
-const checkAuth = require('../../util/checkAuth');
 
+// ---- HELPER FUNCTIONS ---- //
+const checkAuth = require('../../util/checkAuth');
+const { resetRunStats } = require('../../util/resetRunStats');
+const { updateStatsAfterPost } = require('../../util/updateStatsAfterPost');
+const {
+  updateStatsAfterDeleteTime,
+} = require('../../util/updateStatsAfterDelete');
+
+// ---- DATABASE SCHEMAS ---- //
 const Time = require('../../models/Time');
 const User = require('../../models/User');
 
-const toSeconds = (time) => {
-  const splitNewTime = time.split(':');
-  // converting minutes to seconds and adding to seconds
-  const totalNewSeconds = (parseFloat(splitNewTime[0]) * 60) + parseFloat(splitNewTime[1]);
-  return totalNewSeconds
-};
-
 module.exports = {
   Query: {
+    // ---- GET ALL TIMES ---- //
     async getTimes() {
       try {
+        // get all the times in order by most recent time
         const times = await Time.find().sort({ createdAt: -1 });
         return times;
-      } catch(err) {
+      } catch (err) {
         throw new Error(err);
       }
     },
+
+    // ---- GET ONE TIME ---- //
     async getTime(_, { timeId }) {
       try {
         const time = await Time.findById(timeId);
-        if(time){
+        if (time) {
           return time;
-        } else {
-          throw new Error('Time not found')
         }
+        throw new Error('Time not found');
       } catch (err) {
-        throw new Error(err)
+        throw new Error(err);
       }
-    }
+    },
   },
+
+  // ---- MUTATIONS ---- //
   Mutation: {
+    // ---- POST TIME ---- //
     async postTime(_, { time, miles, body }, context) {
+      // confirm the user is signed in
       const user = checkAuth(context);
       const { username } = user;
 
+      // check time format
       const testRegEx = /^(\d\d||\d):[0-5]\d/;
       if (!testRegEx.test(time)) {
         throw new Error('Time must be numbers only and in MM:SS format');
       }
 
+      // check inputs are non-empty
       if (time.trim() === '' || miles.trim() === '' || body.trim() === '') {
-        throw new Error("Time, Mileage and/or How'd it go? must not be empty")
+        throw new Error("Time, Mileage and/or How'd it go? must not be empty");
       }
 
       const foundUser = await User.findOne({ username });
 
-      //----UPDATING TOTAL MILEAGE ----//
-      // grabbing the current total mileage
-      const oldMiles = foundUser.runStats[0].totalMiles;
-      // converting strings to floats and adding the old total to the new total
-      const newTotalMiles = (parseFloat(oldMiles) + parseFloat(miles)).toFixed(1);
+      const updatedUserStats = updateStatsAfterPost(foundUser, time, miles);
 
-      //---- UPDATING TOTAL TIME ----//
-      // grabbing the current total time
-      const oldTotalTime = parseFloat(foundUser.runStats[0].totalTime);
-      const postSeconds = toSeconds(time);
-      const newTotalSeconds = oldTotalTime + postSeconds;
-
-      //---- UPDATING AVG MILE ----//
-      // calculating average mile
-      const newAvgMile = (newTotalSeconds/newTotalMiles).toFixed(0);
-
-      //---- UPDATING LONGEST RUN ----//
-      const updatedLongestTime = () => {
-        // converting new time to seconds
-        const newTime = toSeconds(time);
-        // if the user has a longest time
-        if(foundUser.runStats[0].longestRunTime) {
-          // check if the new time is longer than the current longest time
-          if(newTime > foundUser.runStats[0].longestRunTime) {
-            // if it is, return the new time
-            return newTime;
-          } else {
-            // otherwise kee the old time
-            return foundUser.runStats[0].longestRunTime;
+      // ---- UPDATING USER DATA ----//
+      User.findOneAndUpdate(
+        { username },
+        {
+          $set: {
+            runStats: {
+              ...updatedUserStats,
+            },
+          },
+        },
+        { returnOriginal: false },
+        (err, doc) => {
+          if (err) {
+            console.log('something went wrong');
           }
-        // if the user doesn't have a new longest time, use the new time
-        } else {
-          return newTime
+          console.log(doc);
         }
-      }
+      );
 
-      //---- UPDATING LONGEST MILEAGE ----//
-      const updatedLongestRunMiles = () => {
-        if(miles > foundUser.runStats[0].longestRunMiles) {
-          return miles;
-        } else {
-          return foundUser.runStats[0].longestRunMiles;
-        }
-      };
-
-      //---- CALCULATING QUICKEST PACE ----//
-      const oldPace = foundUser.runStats[0].quickestPace;
-      const newPace = (toSeconds(time)/parseFloat(miles)).toFixed(0);
-      const fastestPace = () => {
-        if (newPace < oldPace || oldPace === '0') {
-          return newPace;
-        } else {
-          return oldPace;
-        }
-      };
-
-      //---- UPDATING USER DATA ----//
-      User.findOneAndUpdate({ username: username }, { 
-        $set: { runStats: { 
-          totalMiles: newTotalMiles, 
-          totalTime: newTotalSeconds, 
-          avgMile: newAvgMile, 
-          longestRunTime: updatedLongestTime(),
-          longestRunMiles: updatedLongestRunMiles(),
-          quickestPace: fastestPace(),
-          postedYet: true
-        }}}, 
-        { returnOriginal: false }, (err, doc) => {
-        if (err) {
-          console.log('something went wrong');
-        }
-        console.log(doc);
-      });
-
+      // create a new time to post to the feed
       const newTime = new Time({
         username: user.username,
         user: user.id,
         time,
         miles,
         body,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
       });
 
+      // save the new post to the feed
       const postTime = await newTime.save();
 
       return postTime;
     },
+
+    // ---- DELETE TIME ---- //
     async deleteTime(_, { timeId }, context) {
+      // confirm the user is signed in
       const user = checkAuth(context);
       const { username } = user;
 
       try {
         const time = await Time.findById(timeId);
-        if(username === time.username) {
-
+        if (username === time.username) {
           const foundUser = await User.findOne({ username });
-          const { runStats } = foundUser;
+          const stats = foundUser.runStats[0];
 
-          //---- UPDATING TOTAL MILES ----//
-          const { totalMiles } = runStats[0];
-          const updatedTotalMiles = (parseFloat(totalMiles) - parseFloat(time.miles)).toFixed(0);
+          const updatedTotalMiles = (
+            parseFloat(stats.totalMiles) - parseFloat(time.miles)
+          ).toFixed(0);
 
+          let updatedUserStats;
           if (updatedTotalMiles <= 0) {
-            User.findOneAndUpdate({ username }, { 
-              $set: { runStats: { 
-                totalMiles: '0', 
-                totalTime: '0', 
-                avgMile: '0', 
-                longestRunTime: '0',
-                longestRunMiles: '0',
-                quickestPace: '0',
-                postedYet: false
-              }}}, 
-              { returnOriginal: false }, (err, doc) => {
-              if (err) {
-                console.log('something went wrong');
-              }
-              console.log(doc);
-            });
+            updatedUserStats = resetRunStats;
           } else {
-
-
-            //---- UPDATING TOTAL TIME ----//
-            const { totalTime } = runStats[0];
-            const updatedTotalTime = parseFloat(totalTime) - parseFloat(toSeconds(time.time));
-  
-            //---- UPDATED AVG MILE ----//
-            const updatedAvgMile = (updatedTotalTime/updatedTotalMiles).toFixed(0);
-  
-            //---- UPDATING LONGEST RUN TIME ----//
+            // find all the times posted by current user
             const times = await Time.find({ username });
-            const newTimes = times.filter(time => timeId !== time.id);
-            const convTimes = newTimes.map(time => toSeconds(time.time))
-            const newLongestTime = Math.max(...convTimes);
-  
-            //---- UPDATING LONGEST RUN MILES ----//
-            const convMiles = newTimes.map(time => parseFloat(time.miles));
-            const newLongestMiles = Math.max(...convMiles);
-  
-            //---- UPDATING QUICKEST PACE ----//
-            const avgMilesArr = newTimes.map(time => toSeconds(time.time)/parseFloat(time.miles));
-            const quickestPace = Math.min(...avgMilesArr).toFixed(0);
-  
-            //---- UPDATING USER DATA ----//
-            User.findOneAndUpdate({ username }, { 
-              $set: { runStats: { 
-                totalMiles: updatedTotalMiles, 
-                totalTime: updatedTotalTime, 
-                avgMile: updatedAvgMile, 
-                longestRunTime: newLongestTime,
-                longestRunMiles: newLongestMiles,
-                quickestPace,
-                postedYet: true
-              }}}, 
-              { returnOriginal: false }, (err, doc) => {
+            updatedUserStats = updateStatsAfterDeleteTime(times, time, stats);
+          }
+
+          User.findOneAndUpdate(
+            { username },
+            {
+              $set: {
+                runStats: {
+                  ...updatedUserStats,
+                },
+              },
+            },
+            { returnOriginal: false },
+            (err, doc) => {
               if (err) {
                 console.log('something went wrong');
               }
               console.log(doc);
-            });
-          }
-          
+            }
+          );
+
           await time.delete();
           return 'Post deleted successfully';
-        } else {
-          throw new AuthenticationError('Action not allowed');
         }
-      } catch(err) {
+        // times can only be deleted by the user who posted it
+        throw new AuthenticationError('Action not allowed');
+      } catch (err) {
         throw new Error(err);
       }
-    }
-  }
-}
+    },
+  },
+};
